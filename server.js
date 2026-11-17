@@ -116,6 +116,18 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
+// Get Only SOS / Emergency Messages (Protected Route)
+app.get('/api/messages/sos', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM messages WHERE content ILIKE '%SOS%' OR is_mesh = true ORDER BY timestamp DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch SOS alerts." });
+  }
+});
+
 // --- SOCKET.IO REAL-TIME & MESH RELAY HANDLING ---
 io.on('connection', (socket) => {
   console.log(`A user connected: ${socket.id}`);

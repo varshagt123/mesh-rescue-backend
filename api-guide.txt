@@ -1,0 +1,21 @@
+--- MESH RESCUE BACKEND CONNECTION GUIDE ---
+
+1. Base URL: http://localhost:5000
+
+2. REST Endpoints (HTTP):
+   - Register: POST /api/register
+     Body JSON: { "username": "field_user_1", "password": "mypassword" }
+   
+   - Login: POST /api/login
+     Body JSON: { "username": "field_user_1", "password": "mypassword" }
+     (Returns a JWT token you must save for future requests)
+
+   - Get Messages: GET /api/messages
+     Headers: { "Authorization": "Bearer <your_jwt_token>" }
+
+3. Socket.io Real-Time Events:
+   - Connect: const socket = io('http://localhost:5000');
+   - Register Node: socket.emit('register_node', { username: '...', role: 'user' or 'rescue_team' });
+   - Send Message: socket.emit('send_message', { sender: '...', recipient: '...', content: '...', is_mesh: false });
+   - Receive Message: socket.on('receive_message', (data) => { ... });
+   - Active Users (Rescue Dashboard only): socket.on('update_active_nodes', (usersList) => { ... });

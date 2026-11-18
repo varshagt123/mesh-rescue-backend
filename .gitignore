@@ -1,2 +1,5 @@
 node_modules/
-.env 
+.env
+mesh.env
+dist/
+.DS_Store

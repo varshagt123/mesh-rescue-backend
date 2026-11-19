@@ -6,7 +6,7 @@ function CommunicationPanel({ currentUser }) {
   const [recipient, setRecipient] = useState('rescue_room');
   const [text, setText] = useState('');
   const [messageType, setMessageType] = useState('CHAT');
-
+const [users, setUsers] = useState([]);
   useEffect(() => {
     async function loadMessages() {
       try {
@@ -17,7 +17,16 @@ function CommunicationPanel({ currentUser }) {
       }
     }
     loadMessages();
+async function loadUsers() {
+  try {
+    const res = await API.get('/users');
+    setUsers(res.data);
+  } catch (err) {
+    console.error('Failed to load users:', err);
+  }
+}
 
+loadUsers();
     const handleNewMsg = (msg) => {
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
     };

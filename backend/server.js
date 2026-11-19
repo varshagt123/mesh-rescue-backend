@@ -216,6 +216,22 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/users', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, username, role
+       FROM users
+       WHERE is_active = true
+       ORDER BY username ASC`
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Failed to fetch users:', err);
+    res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
 // Get Only SOS / Emergency Messages (Protected Route)
 app.get('/api/messages/sos', authenticateToken, async (req, res) => {
   try {

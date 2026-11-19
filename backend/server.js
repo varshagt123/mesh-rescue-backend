@@ -1,3 +1,6 @@
+require('dotenv').config({
+  path: require('path').join(__dirname, 'mesh.env')
+});
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -17,11 +20,15 @@ app.use(cors());
 
 // PostgreSQL Connection Pool
 const pool = new Pool({
-  connectionString: 'postgresql://postgres:postgres123@localhost:5432/mesh_rescue_db'
+  connectionString: process.env.DATABASE_URL
 });
 
 // Secret key for JWT
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_rescue_key';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is missing from mesh.env');
+}
 
 // Track active connected field users in memory
 const activeNodes = new Map(); // username -> socket.id
@@ -38,13 +45,15 @@ async function initDB() {
       );
 
       CREATE TABLE IF NOT EXISTS messages (
-        id SERIAL PRIMARY KEY,
-        sender VARCHAR(50) NOT NULL,
-        recipient VARCHAR(50),
-        content TEXT NOT NULL,
-        is_mesh BOOLEAN DEFAULT false,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
+  id SERIAL PRIMARY KEY,
+  sender VARCHAR(50) NOT NULL,
+  recipient VARCHAR(50),
+  content TEXT NOT NULL,
+  message_type VARCHAR(50) DEFAULT 'CHAT',
+  client_msg_id VARCHAR(100),
+  is_mesh BOOLEAN DEFAULT false,
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
     `);
     console.log("Database tables verified/created successfully.");
   } catch (err) {
@@ -69,42 +78,133 @@ function authenticateToken(req, res, next) {
 
 // --- REST API ENDPOINTS ---
 
-// Register User
+
+// FIELD USER REGISTRATION
 app.post('/api/register', async (req, res) => {
-  const { username, password } = req.body;
+  const { name, username, email, phone, password } = req.body;
+
   try {
+    // Validate required fields
+    if (!name || !username || !email || !phone || !password) {
+      return res.status(400).json({
+        error: "All fields are required."
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: "Password must be at least 8 characters."
+      });
+    }
+
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Always create public registrations as FIELD_USER
     const result = await pool.query(
-      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username',
-      [username, hashedPassword]
+      `INSERT INTO users
+       (name, username, email, phone, password, role)
+       VALUES ($1, $2, $3, $4, $5, 'FIELD_USER')
+       RETURNING id, name, username, email, phone, role`,
+      [name.trim(), username.trim(), email.trim().toLowerCase(),
+       phone.trim(), hashedPassword]
     );
-    res.status(201).json({ message: "User registered successfully", user: result.rows[0] });
+
+    res.status(201).json({
+      message: "Field User registered successfully.",
+      user: result.rows[0]
+    });
+
   } catch (err) {
-    res.status(400).json({ error: "Username already exists or invalid data." });
+    console.error("Registration error:", err);
+
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: "Username or email already exists."
+      });
+    }
+
+    res.status(500).json({
+      error: "Registration failed. Please try again."
+    });
   }
 });
 
-// Login User
+
+
+ // ROLE-BASED LOGIN
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
+
   try {
-    const userResult = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (!username || !password) {
+      return res.status(400).json({
+        error: "Username and password are required."
+      });
+    }
+
+    const userResult = await pool.query(
+      'SELECT * FROM users WHERE username = $1',
+      [username.trim()]
+    );
+
     if (userResult.rows.length === 0) {
-      return res.status(401).json({ error: "Invalid username or password." });
+      return res.status(401).json({
+        error: "Invalid username or password."
+      });
     }
 
     const user = userResult.rows[0];
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(401).json({ error: "Invalid username or password." });
+
+    // Check account status
+    if (!user.is_active) {
+      return res.status(403).json({
+        error: "Your account has been deactivated. Contact Admin."
+      });
     }
 
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ message: "Login successful", token, username: user.username });
+    // Verify password
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      return res.status(401).json({
+        error: "Invalid username or password."
+      });
+    }
+
+    // Generate JWT with role
+    const token = jwt.sign(
+      {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: "Login successful.",
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        role: user.role
+      }
+    });
+
   } catch (err) {
-    res.status(500).json({ error: "Server error during login." });
+    console.error("Login error:", err);
+
+    res.status(500).json({
+      error: "Server error during login."
+    });
   }
 });
+
 
 // Get Message History (Protected: Requires valid JWT Token)
 app.get('/api/messages', authenticateToken, async (req, res) => {
@@ -125,6 +225,40 @@ app.get('/api/messages/sos', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch SOS alerts." });
+  }
+});
+
+app.patch('/api/messages/sos/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { id } = req.params;
+
+    const allowedStatuses = ['PENDING', 'ACKNOWLEDGED', 'RESOLVED'];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status.' });
+    }
+
+    const result = await pool.query(
+      `UPDATE messages
+       SET status = $1
+       WHERE id = $2
+       RETURNING *`,
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'SOS alert not found.' });
+    }
+
+    const updatedMessage = result.rows[0];
+
+    req.app.get('io')?.emit('alert_status_updated', updatedMessage);
+
+    res.json(updatedMessage);
+  } catch (err) {
+    console.error('Failed to update SOS status:', err);
+    res.status(500).json({ error: 'Failed to update SOS status.' });
   }
 });
 
@@ -152,13 +286,30 @@ io.on('connection', (socket) => {
 
   // 2. Handle incoming chat & SOS messages
   socket.on('send_message', async (data) => {
-    const { sender, recipient, content, is_mesh } = data;
+    const {
+  sender,
+  recipient,
+  content,
+  message_type,
+  client_msg_id,
+  is_mesh
+} = data;
     const targetRecipient = recipient || 'rescue_room';
 
     try {
       const saved = await pool.query(
-        'INSERT INTO messages (sender, recipient, content, is_mesh) VALUES ($1, $2, $3, $4) RETURNING *',
-        [sender, targetRecipient, content, is_mesh || false]
+      `INSERT INTO messages
+(sender, recipient, content, message_type, client_msg_id, is_mesh)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *`,
+[
+  sender,
+  targetRecipient,
+  content,
+  message_type || 'CHAT',
+  client_msg_id || null,
+  is_mesh || false
+]
       );
 
       const messagePayload = saved.rows[0];

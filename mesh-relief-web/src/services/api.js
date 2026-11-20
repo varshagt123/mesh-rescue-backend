@@ -26,3 +26,10 @@ API.interceptors.request.use((config) => {
 export const socket = io(SOCKET_URL, {
   autoConnect: false, // Connects when the user logs in
 });
+socket.on('connect', () => {
+  console.log('Socket connected:', socket.id);
+});
+
+socket.on('connect_error', (error) => {
+  console.error('Socket connection error:', error.message);
+});

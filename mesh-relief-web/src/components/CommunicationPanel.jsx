@@ -108,13 +108,27 @@ loadUsers();
       </div>
 
       <form onSubmit={handleSend} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          placeholder="Victim username (or rescue_room)"
-          style={{ padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', width: '200px' }}
-        />
+        
+<select
+  value={recipient}
+  onChange={(e) => setRecipient(e.target.value)}
+  style={{
+    padding: '0.6rem',
+    borderRadius: '6px',
+    border: '1px solid #cbd5e1',
+    width: '250px'
+  }}
+>
+  <option value="rescue_room">All Rescue Team</option>
+  {users
+    .filter((user) => user.username !== currentUser.username)
+    .map((user) => (
+      <option key={user.id} value={user.username}>
+        {user.username}
+      </option>
+    ))}
+</select>
+
         <select
           value={messageType}
           onChange={(e) => setMessageType(e.target.value)}

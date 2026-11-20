@@ -34,33 +34,67 @@ if (!JWT_SECRET) {
 const activeNodes = new Map(); // username -> socket.id
 
 // Initialize Database Tables
+
+// Initialize Database Tables
+
+// Initialize Database Tables
 async function initDB() {
   try {
     await pool.query(`
+      -- Users Table
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
         username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE,
+        phone VARCHAR(20),
         password VARCHAR(255) NOT NULL,
+        role VARCHAR(30) DEFAULT 'FIELD_USER',
+        is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- Messages Table
       CREATE TABLE IF NOT EXISTS messages (
-  id SERIAL PRIMARY KEY,
-  sender VARCHAR(50) NOT NULL,
-  recipient VARCHAR(50),
-  content TEXT NOT NULL,
-  message_type VARCHAR(50) DEFAULT 'CHAT',
-  client_msg_id VARCHAR(100),
-  is_mesh BOOLEAN DEFAULT false,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+        id SERIAL PRIMARY KEY,
+        sender VARCHAR(50) NOT NULL,
+        recipient VARCHAR(50),
+        content TEXT NOT NULL,
+        message_type VARCHAR(50) DEFAULT 'CHAT',
+        client_msg_id VARCHAR(100),
+        is_mesh BOOLEAN DEFAULT false,
+        status VARCHAR(20) DEFAULT 'PENDING',
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Update existing Users Table
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS name VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS email VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS role VARCHAR(30) DEFAULT 'FIELD_USER',
+        ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+      -- Update existing Messages Table
+      ALTER TABLE messages
+        ADD COLUMN IF NOT EXISTS recipient VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS message_type VARCHAR(50) DEFAULT 'CHAT',
+        ADD COLUMN IF NOT EXISTS client_msg_id VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS is_mesh BOOLEAN DEFAULT false,
+        ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'PENDING',
+        ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
     `);
+
     console.log("Database tables verified/created successfully.");
   } catch (err) {
     console.error("Error initializing database tables:", err);
   }
 }
+
 initDB();
+
+
 
 // --- JWT AUTHENTICATION MIDDLEWARE ---
 function authenticateToken(req, res, next) {
@@ -229,6 +263,46 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch users:', err);
     res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
+// Dashboard Statistics API
+app.get('/api/stats', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE content ILIKE '%SOS%' OR is_mesh = true
+        )::int AS "totalSOS",
+
+        COUNT(*) FILTER (
+          WHERE (content ILIKE '%SOS%' OR is_mesh = true)
+          AND UPPER(COALESCE(status, 'PENDING')) = 'PENDING'
+        )::int AS pending,
+
+        COUNT(*) FILTER (
+          WHERE (content ILIKE '%SOS%' OR is_mesh = true)
+          AND UPPER(COALESCE(status, 'PENDING')) = 'ACKNOWLEDGED'
+        )::int AS acknowledged,
+
+        COUNT(*) FILTER (
+          WHERE (content ILIKE '%SOS%' OR is_mesh = true)
+          AND UPPER(COALESCE(status, 'PENDING')) = 'RESOLVED'
+        )::int AS resolved,
+
+        (SELECT COUNT(*)::int FROM users WHERE is_active = true)
+        AS "totalUsers"
+
+      FROM messages;
+    `);
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+    console.error('Dashboard statistics error:', err);
+    res.status(500).json({
+      error: 'Failed to fetch dashboard statistics.'
+    });
   }
 });
 

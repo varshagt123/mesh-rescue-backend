@@ -48,9 +48,9 @@ function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', se
         console.error('Failed to load report breakdown:', err);
       }
 
-      if (currentUser?.role === 'admin') {
+     if (currentUser?.role?.toUpperCase() === 'ADMIN') {
         try {
-          const usersRes = await API.get('/admin/users');
+        const usersRes = await API.get('/users');
           setUsersList(usersRes.data || []);
         } catch (err) {
           console.error('Failed to load users for admin:', err);
@@ -158,7 +158,7 @@ function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', se
       </div>
 
       {/* Administrator User Management */}
-      {currentUser?.role === 'admin' && (
+   {currentUser?.role?.toUpperCase() === 'ADMIN' && (
         <div style={{ padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc' }}>
           <h3>{t.adminSection}</h3>
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '0.5rem' }}>
@@ -172,7 +172,7 @@ function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', se
             <tbody>
               {usersList.map((u) => (
                 <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '0.5rem' }}>{u.formatted_id}</td>
+                  <td style={{ padding: '0.5rem' }}>{u.id}</td>
                   <td style={{ padding: '0.5rem' }}>{u.username}</td>
                   <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{u.role}</td>
                 </tr>

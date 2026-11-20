@@ -53,7 +53,14 @@ function App() {
       name: msg.sender || 'Unknown Victim',
       description: msg.content || 'Emergency assistance requested',
       location: msg.location_name || msg.recipient || 'Emergency Zone',
-      priority: (msg.priority || (msg.content?.includes('CRITICAL') ? 'CRITICAL' : 'HIGH')).toUpperCase(),
+     priority: (() => {
+  const match = msg.content?.match(/Priority:\s*(CRITICAL|SERIOUS|MINOR|HIGH|MEDIUM|LOW)/i);
+  const value = (match?.[1] || msg.priority || 'HIGH').toUpperCase();
+
+  return value === 'SERIOUS' ? 'MEDIUM' :
+         value === 'MINOR' ? 'LOW' :
+         value;
+})(),
       status: (msg.status || 'PENDING').toUpperCase(),
       time: new Date(rawTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: new Date(rawTime).getTime(),
@@ -143,7 +150,34 @@ function App() {
       socket.disconnect();
     };
   }, [currentUser]);
+  const [sosPriority, setSosPriority] = useState('CRITICAL');
+const handleSendSOS = () => {
+  if (!navigator.geolocation) {
+    alert('GPS location is not supported by this browser.');
+    return;
+  }
 
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const payload = {
+        client_msg_id: `SOS-${Date.now()}`,
+        sender: currentUser.username,
+        recipient: 'rescue_room',
+       content: `SOS: Emergency assistance requested. Priority: ${sosPriority}`,
+        message_type: 'MEDICAL_REQUEST',
+        is_mesh: false,
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      };
+
+      socket.emit('send_message', payload);
+      alert('SOS alert sent with your location!');
+    },
+    () => {
+      alert('Unable to get your location. Please enable GPS permission.');
+    }
+  );
+};
   const handleStatusChange = async (alertItem, newStatus) => {
     setAlerts((prev) =>
       prev.map((item) => (item.id === alertItem.id ? { ...item, status: newStatus } : item))
@@ -192,14 +226,19 @@ function App() {
     return <Auth onLoginSuccess={(userData) => setCurrentUser(userData)} />;
   }
 
-  const navItems = [
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'sos', label: 'SOS Alerts' },
-    { key: 'map', label: 'Live Map' },
-    { key: 'communication', label: 'Communication' },
-    { key: 'devices', label: 'Mesh Devices' },
-    { key: 'reports', label: currentUser.role === 'admin' ? 'Reports & Admin' : 'Reports' }
-  ];
+const navItems = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'sos', label: 'SOS Alerts' },
+  { key: 'map', label: 'Live Map' },
+  { key: 'communication', label: 'Communication' },
+  { key: 'devices', label: 'Mesh Devices' },
+  {
+    key: 'reports',
+    label: currentUser.role?.toUpperCase() === 'ADMIN'
+      ? 'Reports & Admin'
+      : 'Reports'
+  }
+];
 
   const derivedPending = stats.pending || alerts.filter((a) => a.status === 'PENDING').length;
   const derivedAck = stats.acknowledged || alerts.filter((a) => a.status === 'ACKNOWLEDGED').length;
@@ -297,7 +336,45 @@ function App() {
                   <p style={{ color: '#64748b', margin: '0 0 1rem' }}>
                     Emergency situation and response statistics at a glance
                   </p>
+{currentUser.role === 'FIELD_USER' && (
+  <>
+  <div style={{ marginBottom: '1rem' }}>
+  <label style={{ fontWeight: 'bold', marginRight: '10px' }}>
+    Emergency Priority:
+  </label>
 
+  <select
+    value={sosPriority}
+    onChange={(e) => setSosPriority(e.target.value)}
+    style={{
+      padding: '10px',
+      borderRadius: '8px',
+      fontSize: '16px'
+    }}
+  >
+    <option value="CRITICAL">Critical</option>
+    <option value="SERIOUS">Serious</option>
+    <option value="MINOR">Minor</option>
+  </select>
+</div>
+  <button
+    onClick={handleSendSOS}
+    style={{
+      backgroundColor: '#dc2626',
+      color: 'white',
+      padding: '14px 28px',
+      border: 'none',
+      borderRadius: '8px',
+      fontWeight: 'bold',
+      fontSize: '18px',
+      cursor: 'pointer',
+      marginBottom: '1rem'
+    }}
+  >
+    🚨 SEND SOS
+  </button>
+  </>
+)}
                   <div
                     style={{
                       display: 'grid',
@@ -444,13 +521,18 @@ function App() {
                                   fontSize: '0.75rem',
                                   fontWeight: 'bold',
                                   backgroundColor:
-                                    alert.priority === 'CRITICAL' || alert.priority === 'HIGH'
-                                      ? '#fee2e2'
-                                      : '#fef3c7',
-                                  color:
-                                    alert.priority === 'CRITICAL' || alert.priority === 'HIGH'
-                                      ? '#991b1b'
-                                      : '#92400e'
+  alert.priority === 'CRITICAL' || alert.priority === 'HIGH'
+    ? '#fee2e2'
+    : alert.priority === 'LOW'
+      ? '#dcfce7'
+      : '#fef3c7',
+
+color:
+  alert.priority === 'CRITICAL' || alert.priority === 'HIGH'
+    ? '#991b1b'
+    : alert.priority === 'LOW'
+      ? '#166534'
+      : '#92400e'
                                 }}
                               >
                                 {alert.priority}

@@ -83,7 +83,9 @@ async function initDB() {
         ADD COLUMN IF NOT EXISTS client_msg_id VARCHAR(100),
         ADD COLUMN IF NOT EXISTS is_mesh BOOLEAN DEFAULT false,
         ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'PENDING',
-        ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
+ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
     `);
 
     console.log("Database tables verified/created successfully.");
@@ -125,11 +127,17 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({
-        error: "Password must be at least 8 characters."
-      });
-    }
+    if (
+  password.length < 8 ||
+  !/[A-Z]/.test(password) ||
+  !/[a-z]/.test(password) ||
+  !/[0-9]/.test(password) ||
+  !/[^A-Za-z0-9]/.test(password)
+) {
+  return res.status(400).json({
+    error: "Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character."
+  });
+}
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -251,6 +259,14 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/users', authenticateToken, async (req, res) => {
+
+  // Only Admin can view the user list
+  if (req.user.role?.toUpperCase() !== 'ADMIN') {
+    return res.status(403).json({
+      error: 'Access denied. Admin privileges required.'
+    });
+  }
+
   try {
     const result = await pool.query(
       `SELECT id, username, role
@@ -260,9 +276,12 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     );
 
     res.json(result.rows);
+
   } catch (err) {
     console.error('Failed to fetch users:', err);
-    res.status(500).json({ error: 'Failed to fetch users.' });
+    res.status(500).json({
+      error: 'Failed to fetch users.'
+    });
   }
 });
 
@@ -305,7 +324,20 @@ app.get('/api/stats', authenticateToken, async (req, res) => {
     });
   }
 });
-
+// Reports API
+app.get('/api/reports', authenticateToken, async (req, res) => {
+  try {
+    res.json({
+      byLocation: [],
+      message: 'Location data is not available yet.'
+    });
+  } catch (err) {
+    console.error('Reports error:', err);
+    res.status(500).json({
+      error: 'Failed to fetch reports.'
+    });
+  }
+});
 // Get Only SOS / Emergency Messages (Protected Route)
 app.get('/api/messages/sos', authenticateToken, async (req, res) => {
   try {
@@ -376,21 +408,23 @@ io.on('connection', (socket) => {
 
   // 2. Handle incoming chat & SOS messages
   socket.on('send_message', async (data) => {
-    const {
+ const {
   sender,
   recipient,
   content,
   message_type,
   client_msg_id,
-  is_mesh
+  is_mesh,
+  latitude,
+  longitude
 } = data;
     const targetRecipient = recipient || 'rescue_room';
 
     try {
       const saved = await pool.query(
       `INSERT INTO messages
-(sender, recipient, content, message_type, client_msg_id, is_mesh)
-VALUES ($1, $2, $3, $4, $5, $6)
+(sender, recipient, content, message_type, client_msg_id, is_mesh, latitude, longitude)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *`,
 [
   sender,
@@ -398,7 +432,9 @@ RETURNING *`,
   content,
   message_type || 'CHAT',
   client_msg_id || null,
-  is_mesh || false
+  is_mesh || false,
+  latitude ?? null,
+  longitude ?? null
 ]
       );
 

@@ -136,6 +136,7 @@ loadUsers();
         >
           <option value="CHAT">Direct Response</option>
           <option value="RESCUE_INSTRUCTION">Rescue Instruction</option>
+          <option value="MEDICAL_REQUEST">Test SOS Alert</option>
         </select>
         <input
           type="text"

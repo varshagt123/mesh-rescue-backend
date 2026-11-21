@@ -112,6 +112,78 @@ function authenticateToken(req, res, next) {
   });
 }
 
+// --- ROLE-BASED AUTHORIZATION MIDDLEWARE ---
+
+const ROLES = Object.freeze({
+  ADMIN: 'ADMIN',
+  RESPONDER: 'RESPONDER',
+  FIELD_USER: 'FIELD_USER'
+});
+
+function authorizeRoles(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: 'Access denied. Insufficient permissions.'
+      });
+    }
+
+    next();
+  };
+}
+// Get registered mesh devices
+
+// Get registered mesh devices
+app.get(
+  '/api/devices',
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const role = String(req.user.role || '').toUpperCase();
+
+      let result;
+
+      if (role === 'ADMIN' || role === 'RESPONDER' || role === 'RESCUE_TEAM') {
+        result = await pool.query(`
+          SELECT
+            d.device_id,
+            u.username,
+            d.connectivity_status,
+            d.sync_status,
+            d.pending_messages,
+            d.last_seen
+          FROM devices d
+          LEFT JOIN users u ON d.user_id = u.id
+          ORDER BY d.created_at DESC
+        `);
+      } else if (role === 'FIELD_USER') {
+        result = await pool.query(`
+          SELECT
+            d.device_id,
+            u.username,
+            d.connectivity_status,
+            d.sync_status,
+            d.pending_messages,
+            d.last_seen
+          FROM devices d
+          LEFT JOIN users u ON d.user_id = u.id
+          WHERE d.user_id = $1
+          ORDER BY d.created_at DESC
+        `, [req.user.id]);
+      } else {
+        return res.status(403).json({
+          error: 'Access denied. Insufficient permissions.'
+        });
+      }
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Failed to fetch devices:', error);
+      res.status(500).json({ error: 'Failed to fetch devices.' });
+    }
+  }
+);
+
 // --- REST API ENDPOINTS ---
 
 
@@ -258,15 +330,13 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/users', authenticateToken, async (req, res) => {
+app.get(
+  '/api/users',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN),
+  async (req, res) => {
 
-  // Only Admin can view the user list
-  if (req.user.role?.toUpperCase() !== 'ADMIN') {
-    return res.status(403).json({
-      error: 'Access denied. Admin privileges required.'
-    });
-  }
-
+  
   try {
     const result = await pool.query(
       `SELECT id, username, role
@@ -286,7 +356,11 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 });
 
 // Dashboard Statistics API
-app.get('/api/stats', authenticateToken, async (req, res) => {
+app.get(
+  '/api/stats',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN, ROLES.RESPONDER),
+  async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -383,28 +457,70 @@ app.patch('/api/messages/sos/:id/status', authenticateToken, async (req, res) =>
     res.status(500).json({ error: 'Failed to update SOS status.' });
   }
 });
+// Authenticate Socket.IO connections using JWT
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
 
+  if (!token) {
+    return next(new Error('Authentication token required'));
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return next(new Error('Invalid or expired token'));
+    }
+
+    socket.user = user;
+    next();
+  });
+});
 // --- SOCKET.IO REAL-TIME & MESH RELAY HANDLING ---
 io.on('connection', (socket) => {
   console.log(`A user connected: ${socket.id}`);
+// Register authenticated field device
+socket.on('register_node', async ({ device_id }) => {
+  console.log('register_node event received:', device_id, 'User:', socket.user);
+  try {
+    
+    const user = socket.user;
 
-  // 1. Register node and track online status
-  socket.on('register_node', ({ username, role }) => {
-    socket.username = username;
-    socket.role = role; // 'user' or 'rescue_team'
+    if (!user || !user.id || !user.username) return;
+   const role = String(user.role || '').toUpperCase();
 
-    if (role === 'rescue_team') {
-      socket.join('rescue_room');
-      console.log(`Rescue Team member ${username} joined rescue_room`);
-    } else if (username) {
-      socket.join(username);
-      activeNodes.set(username, socket.id);
-      console.log(`Field user ${username} online`);
-      
-      // Broadcast live online user list to rescue team dashboard
-      io.to('rescue_room').emit('update_active_nodes', Array.from(activeNodes.keys()));
-    }
-  });
+if (!['ADMIN', 'RESPONDER', 'RESCUE_TEAM', 'FIELD_USER'].includes(role)) {
+  return;
+}
+    if (!device_id) return;
+
+    await pool.query(
+      `INSERT INTO devices
+       (device_id, user_id, connectivity_status, sync_status, pending_messages, last_seen)
+       VALUES ($1, $2, 'ONLINE', 'SYNCED', 0, CURRENT_TIMESTAMP)
+       ON CONFLICT (device_id)
+       DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         connectivity_status = 'ONLINE',
+         last_seen = CURRENT_TIMESTAMP`,
+      [device_id, user.id]
+    );
+
+     socket.deviceId = device_id;
+    socket.username = user.username;
+    socket.role = user.role;
+    socket.join(user.username);
+
+    activeNodes.set(user.username, socket.id);
+
+    io.to('rescue_room').emit(
+      'update_active_nodes',
+      Array.from(activeNodes.keys())
+    );
+
+    console.log(`Device ${device_id} registered for ${user.username}`);
+  } catch (err) {
+    console.error('Device registration failed:', err);
+  }
+});
 
   // 2. Handle incoming chat & SOS messages
   socket.on('send_message', async (data) => {
@@ -468,13 +584,37 @@ RETURNING *`,
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-    if (socket.username && socket.role !== 'rescue_team') {
-      activeNodes.delete(socket.username);
-      io.to('rescue_room').emit('update_active_nodes', Array.from(activeNodes.keys()));
+ 
+socket.on('disconnect', async () => {
+  console.log(`User disconnected: ${socket.id}`);
+
+  try {
+    if (socket.deviceId) {
+      await pool.query(
+       `UPDATE devices
+ SET connectivity_status = 'OFFLINE',
+     last_seen = CURRENT_TIMESTAMP
+ WHERE device_id = $1`,
+        [socket.deviceId]
+      );
+
+      console.log(`Device ${socket.deviceId} marked OFFLINE`);
     }
-  });
+
+    if (
+      socket.username &&
+      activeNodes.get(socket.username) === socket.id
+    ) {
+      activeNodes.delete(socket.username);
+      io.to('rescue_room').emit(
+        'update_active_nodes',
+        Array.from(activeNodes.keys())
+      );
+    }
+  } catch (err) {
+    console.error('Disconnect update failed:', err);
+  }
+});
 });
 
 const PORT = process.env.PORT || 5000;

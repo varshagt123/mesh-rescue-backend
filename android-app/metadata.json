@@ -1,0 +1,6 @@
+{
+  "name": "RescueLink",
+  "description": "Offline Mesh Network Messenger for Disaster Relief",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

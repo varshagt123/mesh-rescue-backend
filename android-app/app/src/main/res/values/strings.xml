@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">RescueLink</string>
+    <string name="app_tagline">Stay Connected. Stay Safe.</string>
+    <string name="app_subtitle">Offline Mesh Network Messenger for Disaster Relief</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_chats">Chats</string>
+    <string name="tab_sos">SOS</string>
+    <string name="tab_nearby">Nearby</string>
+    <string name="tab_profile">Profile</string>
+</resources>

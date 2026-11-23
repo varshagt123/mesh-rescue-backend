@@ -17,15 +17,15 @@ const [users, setUsers] = useState([]);
       }
     }
     loadMessages();
-async function loadUsers() {
-  try {
-    const res = await API.get('/users');
+async function loadUsers() { try {
+   const res = await API.get('/contacts');
     setUsers(res.data);
   } catch (err) {
     console.error('Failed to load users:', err);
   }
 }
 
+ 
 loadUsers();
     const handleNewMsg = (msg) => {
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -129,15 +129,27 @@ loadUsers();
     ))}
 </select>
 
-        <select
-          value={messageType}
-          onChange={(e) => setMessageType(e.target.value)}
-          style={{ padding: '0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-        >
-          <option value="CHAT">Direct Response</option>
-          <option value="RESCUE_INSTRUCTION">Rescue Instruction</option>
-          <option value="MEDICAL_REQUEST">Test SOS Alert</option>
-        </select>
+       
+<select
+  value={messageType}
+  onChange={(e) => setMessageType(e.target.value)}
+  style={{
+    padding: '0.6rem',
+    borderRadius: '6px',
+    border: '1px solid #cbd5e1'
+  }}
+>
+  <option value="CHAT">Direct Message</option>
+
+  {currentUser.role !== 'FIELD_USER' && (
+    <option value="RESCUE_INSTRUCTION">
+      Rescue Instruction
+    </option>
+  )}
+
+  <option value="MEDICAL_REQUEST">SOS Alert</option>
+</select>
+
         <input
           type="text"
           value={text}

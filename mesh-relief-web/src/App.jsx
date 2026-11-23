@@ -55,7 +55,7 @@ function App() {
       location: msg.location_name || msg.recipient || 'Emergency Zone',
      priority: (() => {
   const match = msg.content?.match(/Priority:\s*(CRITICAL|SERIOUS|MINOR|HIGH|MEDIUM|LOW)/i);
-  const value = (match?.[1] || msg.priority || 'HIGH').toUpperCase();
+const value = (match?.[1] || msg.priority || 'NORMAL').toUpperCase();
 
   return value === 'SERIOUS' ? 'MEDIUM' :
          value === 'MINOR' ? 'LOW' :
@@ -106,12 +106,26 @@ function App() {
     setLoading(true);
     fetchDashboardData();
 
-    socket.connect();
-    socket.emit('register_node', {
-      username: currentUser.username,
-      role: currentUser.role
-    });
+   socket.auth = {
+  token: localStorage.getItem('token')
+};
 
+const username = localStorage.getItem('username');
+const deviceKey = `mesh_device_id_${username}`;
+
+let deviceId = localStorage.getItem(deviceKey);
+
+if (!deviceId) {
+  deviceId = `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  localStorage.setItem(deviceKey, deviceId);
+}
+const handleSocketConnect = () => {
+  console.log('Sending device registration:', deviceId);
+  socket.emit('register_node', { device_id: deviceId });
+};
+
+socket.on('connect', handleSocketConnect);
+socket.connect();
     const handleReceiveMessage = (newMessage) => {
       const isEmergency =
         newMessage.content?.toUpperCase().includes('SOS') ||
@@ -145,6 +159,7 @@ function App() {
     socket.on('alert_status_updated', handleStatusUpdate);
 
     return () => {
+      socket.off('connect', handleSocketConnect);
       socket.off('receive_message', handleReceiveMessage);
       socket.off('alert_status_updated', handleStatusUpdate);
       socket.disconnect();
@@ -225,6 +240,7 @@ const handleSendSOS = () => {
   if (!currentUser) {
     return <Auth onLoginSuccess={(userData) => setCurrentUser(userData)} />;
   }
+const userRole = String(currentUser.role || '').trim().toUpperCase();
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -232,12 +248,9 @@ const navItems = [
   { key: 'map', label: 'Live Map' },
   { key: 'communication', label: 'Communication' },
   { key: 'devices', label: 'Mesh Devices' },
-  {
-    key: 'reports',
-    label: currentUser.role?.toUpperCase() === 'ADMIN'
-      ? 'Reports & Admin'
-      : 'Reports'
-  }
+  ...(userRole === 'ADMIN'
+    ? [{ key: 'reports', label: 'Reports & Admin' }]
+    : [])
 ];
 
   const derivedPending = stats.pending || alerts.filter((a) => a.status === 'PENDING').length;
@@ -539,15 +552,25 @@ color:
                               </span>
                             </td>
                             <td style={{ padding: '0.65rem' }} onClick={(e) => e.stopPropagation()}>
-                              <select
-                                value={alert.status}
-                                onChange={(e) => handleStatusChange(alert, e.target.value)}
-                                style={{ padding: '0.3rem 0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                              >
-                                <option value="PENDING">PENDING</option>
-                                <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
-                                <option value="RESOLVED">RESOLVED</option>
-                              </select>
+                              {['ADMIN', 'RESPONDER', 'RESCUE_TEAM'].includes(
+  String(currentUser.role || '').trim().toUpperCase()
+) ? (
+  <select
+    value={alert.status}
+    onChange={(e) => handleStatusChange(alert, e.target.value)}
+    style={{
+      padding: '0.3rem 0.5rem',
+      borderRadius: '4px',
+      border: '1px solid #cbd5e1'
+    }}
+  >
+    <option value="PENDING">PENDING</option>
+    <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
+    <option value="RESOLVED">RESOLVED</option>
+  </select>
+) : (
+  <span>{alert.status}</span>
+)}
                             </td>
                             <td style={{ padding: '0.65rem' }}>{alert.time}</td>
                           </tr>

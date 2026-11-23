@@ -8,7 +8,12 @@ function MeshDevices() {
 
   const loadDevices = async () => {
     try {
-      const res = await API.get('/devices');
+      const res = await API.get('/devices', {
+  headers: {
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
+  }
+});
       setDevices(res.data);
     } catch (err) {
       console.error('Failed to fetch devices:', err);
@@ -47,15 +52,26 @@ function MeshDevices() {
             Registered field devices, last-seen timestamps, connectivity, and sync status
           </p>
         </div>
-        <button
-          onClick={loadDevices}
-          style={{
-            padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid #cbd5e1',
-            backgroundColor: '#ffffff', cursor: 'pointer', fontWeight: 'bold'
-          }}
-        >
-          Refresh Devices
-        </button>
+      <button
+  type="button"
+  onClick={() => {
+    console.log('Refresh button clicked');
+    setLoading(true);
+    loadDevices();
+  }}
+  style={{
+    padding: '0.5rem 1rem',
+    borderRadius: '6px',
+    border: '1px solid #cbd5e1',
+    backgroundColor: '#ffffff',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    position: 'relative',
+    zIndex: 10
+  }}
+>
+  Refresh Devices
+</button>
       </div>
 
       {activeUsernames.length > 0 && (

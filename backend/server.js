@@ -188,46 +188,89 @@ app.get(
 
 
 // FIELD USER REGISTRATION
+// FIELD USER REGISTRATION
 app.post('/api/register', async (req, res) => {
   const { name, username, email, phone, password } = req.body;
 
   try {
-    // Validate required fields
+    // 1. Required field validation
     if (!name || !username || !email || !phone || !password) {
       return res.status(400).json({
         error: "All fields are required."
       });
     }
 
-    if (
-  password.length < 8 ||
-  !/[A-Z]/.test(password) ||
-  !/[a-z]/.test(password) ||
-  !/[0-9]/.test(password) ||
-  !/[^A-Za-z0-9]/.test(password)
-) {
-  return res.status(400).json({
-    error: "Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character."
-  });
-}
+    const cleanUsername = username.trim();
 
-    // Hash password
+    // 2. Username length validation
+    if (cleanUsername.length < 4 || cleanUsername.length > 20) {
+      return res.status(400).json({
+        error: "Username must be between 4 and 20 characters."
+      });
+    }
+
+    // 3. Username character validation
+    if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+      return res.status(400).json({
+        error: "Username can contain only letters, numbers, and underscores."
+      });
+    }
+
+    // 4. Password length validation
+    if (password.length < 8 || password.length > 20) {
+      return res.status(400).json({
+        error: "Password must be between 8 and 20 characters."
+      });
+    }
+
+    // 5. Password strength validation
+    if (
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/[0-9]/.test(password) ||
+      !/[^A-Za-z0-9]/.test(password) ||
+      /\s/.test(password)
+    ) {
+      return res.status(400).json({
+        error: "Password must contain uppercase, lowercase, number, special character, and no spaces."
+      });
+    }
+
+    // 6. Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Always create public registrations as FIELD_USER
+    // 7. Save user as FIELD_USER
     const result = await pool.query(
       `INSERT INTO users
        (name, username, email, phone, password, role)
        VALUES ($1, $2, $3, $4, $5, 'FIELD_USER')
        RETURNING id, name, username, email, phone, role`,
-      [name.trim(), username.trim(), email.trim().toLowerCase(),
-       phone.trim(), hashedPassword]
+      [
+        name.trim(),
+        cleanUsername,
+        email.trim().toLowerCase(),
+        phone.trim(),
+        hashedPassword
+      ]
     );
+const newUser = result.rows[0];
 
-    res.status(201).json({
-      message: "Field User registered successfully.",
-      user: result.rows[0]
-    });
+// Generate JWT token after registration
+const token = jwt.sign(
+  {
+    id: newUser.id,
+    username: newUser.username,
+    role: newUser.role
+  },
+  JWT_SECRET,
+  { expiresIn: '7d' }
+);
+
+res.status(201).json({
+  message: "Field User registered successfully.",
+  token,
+  user: newUser
+});
 
   } catch (err) {
     console.error("Registration error:", err);

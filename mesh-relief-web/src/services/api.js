@@ -24,7 +24,10 @@ API.interceptors.request.use((config) => {
 
 // Socket.IO connection for real-time messaging and offline sync
 export const socket = io(SOCKET_URL, {
-  autoConnect: false, // Connects when the user logs in
+  autoConnect: false,
+  auth: {
+    token: localStorage.getItem('token')
+  }
 });
 socket.on('connect', () => {
   console.log('Socket connected:', socket.id);

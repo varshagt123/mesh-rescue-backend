@@ -56,7 +56,7 @@ function App() {
      priority: (() => {
   const match = msg.content?.match(/Priority:\s*(CRITICAL|SERIOUS|MINOR|HIGH|MEDIUM|LOW)/i);
 const value = (match?.[1] || msg.priority || 'NORMAL').toUpperCase();
-
+console.log("RAW MESSAGE:", msg);
   return value === 'SERIOUS' ? 'MEDIUM' :
          value === 'MINOR' ? 'LOW' :
          value;
@@ -64,8 +64,9 @@ const value = (match?.[1] || msg.priority || 'NORMAL').toUpperCase();
       status: (msg.status || 'PENDING').toUpperCase(),
       time: new Date(rawTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: new Date(rawTime).getTime(),
-      lat: Number.isFinite(Number(msg.latitude)) ? Number(msg.latitude) : 16.3067 + ((numericId % 7) - 3) * 0.006,
-      lng: Number.isFinite(Number(msg.longitude)) ? Number(msg.longitude) : 80.4365 + (((numericId * 3) % 7) - 3) * 0.006
+     lat: msg.latitude != null && msg.latitude !== '' ? Number(msg.latitude) : null,
+
+lng: msg.longitude != null && msg.longitude !== '' ? Number(msg.longitude) : null
     };
   };
 
@@ -75,10 +76,19 @@ const value = (match?.[1] || msg.priority || 'NORMAL').toUpperCase();
         API.get('/messages/sos'),
         API.get('/stats').catch(() => ({ data: null }))
       ]);
-
+console.log("SOS API RESPONSE:", sosRes.data);
+console.table(
+  sosRes.data.map(msg => ({
+    id: msg.id,
+    latitude: msg.latitude,
+    longitude: msg.longitude
+  }))
+);
       const formatted = (sosRes.data || []).map((msg, idx) => formatAlertFromMessage(msg, idx));
+      console.log("API SOS DATA:", sosRes.data);
+console.log("FORMATTED ALERTS:", formatted);
       setAlerts(formatted);
-
+console.log("ALERTS SENT TO STATE:", formatted.length);
       if (statsRes.data) {
         setStats(statsRes.data);
       } else {
@@ -208,35 +218,53 @@ const handleSendSOS = () => {
     }
   };
 
-  const filteredAndSortedAlerts = useMemo(() => {
-    const priorityRank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
-    const filtered = alerts.filter((a) => {
-      const matchesQuery =
-        !searchQuery.trim() ||
-        a.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.userId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.description.toLowerCase().includes(searchQuery.toLowerCase());
+const filteredAndSortedAlerts = useMemo(() => {
+  const priorityRank = {
+    CRITICAL: 4,
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1
+  };
 
-      const matchesPriority = priorityFilter === 'ALL' || a.priority === priorityFilter;
-      const matchesStatus = statusFilter === 'ALL' || a.status === statusFilter;
+  const filtered = alerts.filter((a) => {
+    const query = searchQuery.trim().toLowerCase();
 
-      return matchesQuery && matchesPriority && matchesStatus;
-    });
+    const matchesQuery =
+      !query ||
+      String(a.id || '').toLowerCase().includes(query) ||
+      String(a.userId || '').toLowerCase().includes(query) ||
+      String(a.name || '').toLowerCase().includes(query) ||
+      String(a.location || '').toLowerCase().includes(query) ||
+      String(a.description || '').toLowerCase().includes(query);
 
-    return [...filtered].sort((a, b) => {
-      if (sortBy === 'priority_desc') {
-        return (priorityRank[b.priority] || 0) - (priorityRank[a.priority] || 0);
-      }
-      if (sortBy === 'time_asc') {
-        return a.timestamp - b.timestamp;
-      }
-      return b.timestamp - a.timestamp;
-    });
-  }, [alerts, searchQuery, priorityFilter, statusFilter, sortBy]);
+    const matchesPriority =
+      priorityFilter === 'ALL' ||
+      String(a.priority || '').toUpperCase() === priorityFilter;
 
+    const matchesStatus =
+      statusFilter === 'ALL' ||
+      String(a.status || '').toUpperCase() === statusFilter;
+
+    return matchesQuery && matchesPriority && matchesStatus;
+  });
+
+  return [...filtered].sort((a, b) => {
+    if (sortBy === 'priority_desc') {
+      return (priorityRank[String(b.priority).toUpperCase()] || 0) -
+             (priorityRank[String(a.priority).toUpperCase()] || 0);
+    }
+
+    if (sortBy === 'time_asc') {
+      return new Date(a.timestamp || 0) - new Date(b.timestamp || 0);
+    }
+
+    return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+  });
+}, [alerts, searchQuery, priorityFilter, statusFilter, sortBy]);
+
+console.log("FILTERED MAP ALERTS:", filteredAndSortedAlerts.length);
+console.log("FIRST MAP ALERT:", filteredAndSortedAlerts[0]);
   if (!currentUser) {
     return <Auth onLoginSuccess={(userData) => setCurrentUser(userData)} />;
   }

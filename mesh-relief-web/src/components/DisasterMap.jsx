@@ -10,23 +10,63 @@ import "leaflet/dist/leaflet.css";
 import { useEffect } from "react";
 import { useMap } from "react-leaflet";
 function DisasterMap({ alerts = [] }) {
+  console.log("MAP ALERTS:", alerts);
+  console.log("FIRST ALERT:", alerts[0]);
+  console.log("COORDINATES:", {
+  latitude: alerts[0]?.latitude,
+  longitude: alerts[0]?.longitude,
+  lat: alerts[0]?.lat,
+  lng: alerts[0]?.lng,
+  priority: alerts[0]?.priority
+});
+
+const isValidCoordinates = (alert) => {
+  if (
+    alert.lat == null ||
+    alert.lng == null ||
+    alert.lat === '' ||
+    alert.lng === ''
+  ) {
+    return false;
+  }
+
+  const lat = Number(alert.lat);
+  const lng = Number(alert.lng);
+
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+};
+
+
+const validAlerts = alerts.filter(isValidCoordinates);
+console.log("VALID ALERT COUNT:", validAlerts.length);
+console.log("MAP MARKER DATA:", validAlerts.map(a => ({
+  id: a.id,
+  lat: a.lat,
+  lng: a.lng,
+  priority: a.priority
+})));
+console.log("TOTAL ALERTS:", alerts.length);
+console.log("VALID ALERTS:", validAlerts.length);
+console.log("FIRST VALID ALERT:", validAlerts[0]);
   const MapUpdater = () => {
     const map = useMap();
 
     useEffect(() => {
       const priorityOrder = {
+        critical: 4,
   high: 3,
   medium: 2,
   low: 1
 };
 
-const latestAlert = [...alerts]
-  .filter(alert =>
-    alert.lat != null &&
-    alert.lng != null &&
-    Number.isFinite(Number(alert.lat)) &&
-    Number.isFinite(Number(alert.lng))
-  )
+const latestAlert = [...validAlerts]
+ 
   .sort((a, b) => {
     const priorityDifference =
       (priorityOrder[b.priority?.toLowerCase()] || 0) -
@@ -40,26 +80,31 @@ const latestAlert = [...alerts]
 
       if (latestAlert) {
         map.setView(
-          [Number(latestAlert.lat), Number(latestAlert.lng)],
+        [
+  Number(latestAlert.lat),
+  Number(latestAlert.lng)
+],
           14
         );
       }
-    }, [alerts, map]);
+    }, [validAlerts, map]);
 
     return null;
   };
   const getColor = (priority) => {
-    switch (priority?.toLowerCase()) {
-      case "high":
-        return "red";
-      case "medium":
-        return "orange";
-      case "low":
-        return "green";
-      default:
-        return "blue";
-    }
-  };
+  switch (priority?.toLowerCase()) {
+    case "critical":
+      return "#8B0000"; // Dark red
+    case "high":
+      return "#FF0000"; // Bright red
+    case "medium":
+      return "#FFA500"; // Orange
+    case "low":
+      return "#008000"; // Green
+    default:
+      return "#0000FF";
+  }
+};
 
   return (
     <div className="map-container">
@@ -74,18 +119,13 @@ const latestAlert = [...alerts]
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {alerts
-          .filter(alert =>
-            Number.isFinite(Number(alert.lat)) &&
-            Number.isFinite(Number(alert.lng))
-          )
-          .map((alert) => (
+       {validAlerts.map((alert) => (
             <CircleMarker
               key={alert.id}
-              center={[
-                Number(alert.lat),
-                Number(alert.lng)
-              ]}
+             center={[
+  Number(alert.lat),
+  Number(alert.lng)
+]}
               radius={10}
               pathOptions={{
                 color: getColor(alert.priority),

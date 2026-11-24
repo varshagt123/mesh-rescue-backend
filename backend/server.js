@@ -202,28 +202,26 @@ app.post('/api/register', async (req, res) => {
 
     const cleanUsername = username.trim();
 
-    // 2. Username length validation
+    // 2. Username validation
     if (cleanUsername.length < 4 || cleanUsername.length > 20) {
       return res.status(400).json({
         error: "Username must be between 4 and 20 characters."
       });
     }
 
-    // 3. Username character validation
     if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
       return res.status(400).json({
         error: "Username can contain only letters, numbers, and underscores."
       });
     }
 
-    // 4. Password length validation
+    // 3. Password validation
     if (password.length < 8 || password.length > 20) {
       return res.status(400).json({
         error: "Password must be between 8 and 20 characters."
       });
     }
 
-    // 5. Password strength validation
     if (
       !/[A-Z]/.test(password) ||
       !/[a-z]/.test(password) ||
@@ -236,15 +234,15 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
-    // 6. Hash password
+    // 4. Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 7. Save user as FIELD_USER
+    // 5. Public registration always creates FIELD_USER
     const result = await pool.query(
       `INSERT INTO users
-       (name, username, email, phone, password, role)
-       VALUES ($1, $2, $3, $4, $5, 'FIELD_USER')
-       RETURNING id, name, username, email, phone, role`,
+       (name, username, email, phone, password, role, status, is_active)
+       VALUES ($1, $2, $3, $4, $5, 'FIELD_USER', 'APPROVED', TRUE)
+       RETURNING id, name, username, email, phone, role, status`,
       [
         name.trim(),
         cleanUsername,
@@ -253,24 +251,25 @@ app.post('/api/register', async (req, res) => {
         hashedPassword
       ]
     );
-const newUser = result.rows[0];
 
-// Generate JWT token after registration
-const token = jwt.sign(
-  {
-    id: newUser.id,
-    username: newUser.username,
-    role: newUser.role
-  },
-  JWT_SECRET,
-  { expiresIn: '7d' }
-);
+    const newUser = result.rows[0];
 
-res.status(201).json({
-  message: "Field User registered successfully.",
-  token,
-  user: newUser
-});
+    // 6. Generate JWT token
+    const token = jwt.sign(
+      {
+        id: newUser.id,
+        username: newUser.username,
+        role: newUser.role
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    return res.status(201).json({
+      message: "Field User registered successfully.",
+      token,
+      user: newUser
+    });
 
   } catch (err) {
     console.error("Registration error:", err);
@@ -281,15 +280,14 @@ res.status(201).json({
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       error: "Registration failed. Please try again."
     });
   }
 });
 
 
-
- // ROLE-BASED LOGIN
+// ROLE-BASED LOGIN
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
@@ -313,14 +311,7 @@ app.post('/api/login', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check account status
-    if (!user.is_active) {
-      return res.status(403).json({
-        error: "Your account has been deactivated. Contact Admin."
-      });
-    }
-
-    // Verify password
+    // Verify password first
     const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
@@ -329,18 +320,50 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    // Generate JWT with role
+    const role = String(user.role || '').toUpperCase();
+    const status = String(user.status || 'APPROVED').toUpperCase();
+
+    // Responder approval check
+    if (role === 'RESPONDER') {
+
+      if (status === 'PENDING') {
+        return res.status(403).json({
+          error: "Your Responder account is waiting for Admin approval."
+        });
+      }
+
+      if (status === 'REJECTED') {
+        return res.status(403).json({
+          error: "Your Responder access request was rejected. Contact Admin."
+        });
+      }
+
+      if (status !== 'APPROVED') {
+        return res.status(403).json({
+          error: "Your Responder account is not approved."
+        });
+      }
+    }
+
+    // Check account activation
+    if (user.is_active === false) {
+      return res.status(403).json({
+        error: "Your account has been deactivated. Contact Admin."
+      });
+    }
+
+    // Generate JWT
     const token = jwt.sign(
       {
         id: user.id,
         username: user.username,
-        role: user.role
+        role: role
       },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.json({
+    return res.json({
       message: "Login successful.",
       token,
       user: {
@@ -349,18 +372,205 @@ app.post('/api/login', async (req, res) => {
         username: user.username,
         email: user.email,
         phone: user.phone,
-        role: user.role
+        role: role,
+        status: status
       }
     });
 
   } catch (err) {
     console.error("Login error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
       error: "Server error during login."
     });
   }
 });
+
+/* =====================================
+   RESPONDER ACCESS REQUEST
+===================================== */
+
+// Anyone can request Responder access.
+// They cannot log in until Admin approves.
+app.post('/api/responder/request', async (req, res) => {
+  const { name, username, email, phone, password, organization } = req.body;
+
+  try {
+    if (!name || !username || !email || !phone || !password || !organization) {
+      return res.status(400).json({
+        error: 'All fields are required.'
+      });
+    }
+
+    const cleanUsername = username.trim();
+
+    if (cleanUsername.length < 4 || cleanUsername.length > 20 ||
+        !/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+      return res.status(400).json({
+        error: 'Username must be 4-20 characters and contain only letters, numbers or underscores.'
+      });
+    }
+
+    if (
+      password.length < 8 ||
+      password.length > 20 ||
+      !/[A-Z]/.test(password) ||
+      !/[a-z]/.test(password) ||
+      !/[0-9]/.test(password) ||
+      !/[^A-Za-z0-9]/.test(password) ||
+      /\s/.test(password)
+    ) {
+      return res.status(400).json({
+        error: 'Password must contain uppercase, lowercase, number and special character, with no spaces.'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await pool.query(
+      `INSERT INTO users
+       (name, username, email, phone, password, role, status, is_active, organization)
+       VALUES ($1, $2, $3, $4, $5, 'RESPONDER', 'PENDING', FALSE, $6)`,
+      [
+        name.trim(),
+        cleanUsername,
+        email.trim().toLowerCase(),
+        phone.trim(),
+        hashedPassword,
+        organization.trim()
+      ]
+    );
+
+    return res.status(201).json({
+      message: 'Responder access request submitted. Please wait for Admin approval.'
+    });
+
+  } catch (err) {
+    console.error('Responder request error:', err);
+
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'Username or email already exists.'
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Could not submit Responder request.'
+    });
+  }
+});
+
+
+/* =====================================
+   ADMIN: VIEW PENDING RESPONDER REQUESTS
+===================================== */
+
+app.get(
+  '/api/responder/requests',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT id, name, username, email, phone, organization, created_at
+         FROM users
+         WHERE UPPER(role) = 'RESPONDER'
+         AND UPPER(status) = 'PENDING'
+         ORDER BY created_at ASC`
+      );
+
+      return res.json(result.rows);
+
+    } catch (err) {
+      console.error('Responder requests error:', err);
+      return res.status(500).json({
+        error: 'Could not load responder requests.'
+      });
+    }
+  }
+);
+
+
+/* =====================================
+   ADMIN: APPROVE RESPONDER
+===================================== */
+
+app.put(
+  '/api/responder/approve/:id',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        `UPDATE users
+         SET status = 'APPROVED', is_active = TRUE
+         WHERE id = $1
+         AND UPPER(role) = 'RESPONDER'
+         AND UPPER(status) = 'PENDING'
+         RETURNING id, username, role, status, is_active`,
+        [req.params.id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Pending Responder request not found.'
+        });
+      }
+
+      return res.json({
+        message: 'Responder approved successfully.',
+        user: result.rows[0]
+      });
+
+    } catch (err) {
+      console.error('Responder approval error:', err);
+      return res.status(500).json({
+        error: 'Could not approve Responder.'
+      });
+    }
+  }
+);
+
+
+/* =====================================
+   ADMIN: REJECT RESPONDER
+===================================== */
+
+app.put(
+  '/api/responder/reject/:id',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        `UPDATE users
+         SET status = 'REJECTED', is_active = FALSE
+         WHERE id = $1
+         AND UPPER(role) = 'RESPONDER'
+         AND UPPER(status) = 'PENDING'
+         RETURNING id, username, role, status`,
+        [req.params.id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Pending Responder request not found.'
+        });
+      }
+
+      return res.json({
+        message: 'Responder request rejected.',
+        user: result.rows[0]
+      });
+
+    } catch (err) {
+      console.error('Responder rejection error:', err);
+      return res.status(500).json({
+        error: 'Could not reject Responder.'
+      });
+    }
+  }
+);
 
 
 // Get Message History (Protected: Requires valid JWT Token)
@@ -372,32 +582,87 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch messages." });
   }
 });
-
 app.get(
   '/api/users',
   authenticateToken,
   authorizeRoles(ROLES.ADMIN),
   async (req, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT
+           id,
+           name,
+           username,
+           email,
+           phone,
+           role,
+           status,
+           is_active,
+           organization,
+           created_at
+         FROM users
+         ORDER BY id DESC`
+      );
 
-  
-  try {
-    const result = await pool.query(
-      `SELECT id, username, role
-       FROM users
-       WHERE is_active = true
-       ORDER BY username ASC`
-    );
+      res.json(result.rows);
 
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error('Failed to fetch users:', err);
-    res.status(500).json({
-      error: 'Failed to fetch users.'
-    });
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+      res.status(500).json({
+        error: 'Failed to fetch users.'
+      });
+    }
   }
-});
+);
+app.delete(
+  '/api/users/:id',
+  authenticateToken,
+  authorizeRoles(ROLES.ADMIN),
+  async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
 
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(400).json({
+          error: 'Invalid user ID.'
+        });
+      }
+
+      // Protect Admin accounts
+      const user = await pool.query(
+        'SELECT id, role FROM users WHERE id = $1',
+        [userId]
+      );
+
+      if (user.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found.'
+        });
+      }
+
+      if (String(user.rows[0].role).toUpperCase() === 'ADMIN') {
+        return res.status(403).json({
+          error: 'Admin accounts cannot be deleted.'
+        });
+      }
+
+      await pool.query(
+        'DELETE FROM users WHERE id = $1',
+        [userId]
+      );
+
+      return res.json({
+        message: 'User deleted successfully.'
+      });
+
+    } catch (err) {
+      console.error('Delete user error:', err);
+      return res.status(500).json({
+        error: 'Failed to delete user.'
+      });
+    }
+  }
+);
 // Dashboard Statistics API
 app.get(
   '/api/stats',

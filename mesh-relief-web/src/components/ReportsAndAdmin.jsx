@@ -37,6 +37,7 @@ const TRANSLATIONS = {
 function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', setLang }) {
   const [locationBreakdown, setLocationBreakdown] = useState([]);
   const [usersList, setUsersList] = useState([]);
+  const [pendingResponders, setPendingResponders] = useState([]);
   const t = TRANSLATIONS[lang] || TRANSLATIONS.en;
 
   useEffect(() => {
@@ -52,6 +53,8 @@ function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', se
         try {
         const usersRes = await API.get('/users');
           setUsersList(usersRes.data || []);
+          const requestsRes = await API.get('/responder/requests');
+setPendingResponders(requestsRes.data || []);
         } catch (err) {
           console.error('Failed to load users for admin:', err);
         }
@@ -157,26 +160,150 @@ function ReportsAndAdmin({ alerts = [], stats = {}, currentUser, lang = 'en', se
         </ul>
       </div>
 
+{/* Pending Responder Requests */}
+<div style={{
+  padding: '1rem',
+  marginBottom: '1.5rem',
+  borderRadius: '8px',
+  border: '1px solid #fbbf24',
+  background: '#fffbeb'
+}}>
+  <h3>Pending Responder Access Requests</h3>
+
+  {pendingResponders.length === 0 ? (
+    <p>No pending responder requests.</p>
+  ) : (
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ textAlign: 'left' }}>
+          <th style={{ padding: '8px' }}>Name</th>
+          <th style={{ padding: '8px' }}>Username</th>
+          <th style={{ padding: '8px' }}>Organization</th>
+          <th style={{ padding: '8px' }}>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {pendingResponders.map((r) => (
+          <tr key={r.id}>
+            <td style={{ padding: '8px' }}>{r.name}</td>
+            <td style={{ padding: '8px' }}>{r.username}</td>
+            <td style={{ padding: '8px' }}>{r.organization}</td>
+            <td style={{ padding: '8px' }}>
+              <button
+                onClick={async () => {
+                  try {
+                    await API.put(`/responder/approve/${r.id}`);
+                    setPendingResponders(prev =>
+                      prev.filter(item => item.id !== r.id)
+                    );
+                    alert('Responder approved successfully.');
+                  } catch (err) {
+                    alert(err.response?.data?.message || 'Approval failed.');
+                  }
+                }}
+                style={{
+                  background: '#16a34a',
+                  color: 'white',
+                  border: 'none',
+                  padding: '6px 10px',
+                  borderRadius: '5px',
+                  marginRight: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Approve
+              </button>
+
+              <button
+                onClick={async () => {
+                  try {
+                    await API.put(`/responder/reject/${r.id}`);
+                    setPendingResponders(prev =>
+                      prev.filter(item => item.id !== r.id)
+                    );
+                    alert('Responder request rejected.');
+                  } catch (err) {
+                    alert(err.response?.data?.message || 'Rejection failed.');
+                  }
+                }}
+                style={{
+                  background: '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  padding: '6px 10px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                Reject
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</div>
+
       {/* Administrator User Management */}
    {currentUser?.role?.toUpperCase() === 'ADMIN' && (
         <div style={{ padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc' }}>
           <h3>{t.adminSection}</h3>
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '0.5rem' }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '1px solid #cbd5e1' }}>
-                <th style={{ padding: '0.5rem' }}>User ID</th>
-                <th style={{ padding: '0.5rem' }}>Username</th>
-                <th style={{ padding: '0.5rem' }}>Role</th>
-              </tr>
-            </thead>
+           <thead>
+  <tr style={{ textAlign: 'left', borderBottom: '1px solid #cbd5e1' }}>
+    <th style={{ padding: '0.5rem' }}>User ID</th>
+    <th style={{ padding: '0.5rem' }}>Username</th>
+    <th style={{ padding: '0.5rem' }}>Role</th>
+    <th style={{ padding: '0.5rem' }}>Action</th>
+  </tr>
+</thead>
             <tbody>
-              {usersList.map((u) => (
-                <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '0.5rem' }}>{u.id}</td>
-                  <td style={{ padding: '0.5rem' }}>{u.username}</td>
-                  <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{u.role}</td>
-                </tr>
-              ))}
+             {usersList.map((u) => (
+  <tr key={u.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+    <td style={{ padding: '0.5rem' }}>{u.id}</td>
+    <td style={{ padding: '0.5rem' }}>{u.username}</td>
+    <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>{u.role}</td>
+    <td style={{ padding: '0.5rem' }}>
+      {u.role?.toUpperCase() === 'ADMIN' ? (
+        <span>Protected</span>
+      ) : (
+        <button
+          onClick={async () => {
+            const confirmed = window.confirm(
+              `Are you sure you want to permanently delete ${u.username}?`
+            );
+
+            if (!confirmed) return;
+
+            try {
+              await API.delete(`/users/${u.id}`);
+
+              setUsersList((prev) =>
+                prev.filter((user) => user.id !== u.id)
+              );
+
+              alert('User deleted successfully.');
+            } catch (err) {
+              console.error('Delete user failed:', err);
+              alert(err.response?.data?.error || 'Failed to delete user.');
+            }
+          }}
+          style={{
+            background: '#dc2626',
+            color: 'white',
+            border: 'none',
+            padding: '6px 12px',
+            borderRadius: '5px',
+            cursor: 'pointer'
+          }}
+        >
+          Delete
+        </button>
+      )}
+    </td>
+  </tr>
+))}
             </tbody>
           </table>
         </div>

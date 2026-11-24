@@ -4,14 +4,16 @@ import { API } from '../services/api';
 
 function Auth({ onLoginSuccess }) {
   const [isRegister, setIsRegister] = useState(false);
-
+const [isResponderRequest, setIsResponderRequest] = useState(false);
+const [organization, setOrganization] = useState('');
   const [form, setForm] = useState({
     name: '',
     username: '',
     email: '',
     phone: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    role: 'FIELD_USER'
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -30,13 +32,18 @@ function Auth({ onLoginSuccess }) {
     setIsRegister(register);
     setError('');
     setSuccess('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+setIsResponderRequest(false);
+setOrganization('');
     setForm({
       name: '',
       username: '',
       email: '',
       phone: '',
       password: '',
-      confirmPassword: ''
+      confirmPassword: '',
+      role: 'FIELD_USER'
     });
   };
 
@@ -56,6 +63,9 @@ function Auth({ onLoginSuccess }) {
     }
 
     if (isRegister) {
+      if (isResponderRequest && !organization.trim()) {
+  return 'Please enter your organization.';
+}
       if (!form.name.trim()) return 'Please enter your full name.';
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -100,24 +110,42 @@ const handleSubmit = async (e) => {
     return;
   }
 
+  if (isResponderRequest && !organization.trim()) {
+    setError('Please enter your organization or rescue team.');
+    return;
+  }
+
   setLoading(true);
 
   try {
-    if (isRegister) {
+    if (isResponderRequest) {
+      const res = await API.post('/responder/request', {
+        name: form.name.trim(),
+        username: form.username.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        password: form.password,
+        organization: organization.trim()
+      });
+
+      setSuccess(res.data.message || 'Responder request submitted. Wait for Admin approval.');
+      setIsRegister(false);
+      setIsResponderRequest(false);
+      setOrganization('');
+
+    } else if (isRegister) {
       const res = await API.post('/register', {
         name: form.name.trim(),
         username: form.username.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
-        password: form.password
+        password: form.password,
+        role: 'FIELD_USER'
       });
 
-      // Save token and user details
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('username', res.data.user.username);
       localStorage.setItem('role', res.data.user.role);
-
-      // Directly open the dashboard
       onLoginSuccess(res.data.user);
 
     } else {
@@ -129,22 +157,15 @@ const handleSubmit = async (e) => {
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('username', res.data.user.username);
       localStorage.setItem('role', res.data.user.role);
-
       onLoginSuccess(res.data.user);
     }
+
   } catch (err) {
-    setError(
-      err.response?.data?.error ||
-      (isRegister
-        ? 'Registration failed. Please try again.'
-        : 'Invalid username or password.')
-    );
+    setError(err.response?.data?.message || 'Something went wrong. Please try again.');
   } finally {
     setLoading(false);
   }
 };
-
- 
 
   const inputStyle = {
     width: '100%',
@@ -154,6 +175,35 @@ const handleSubmit = async (e) => {
     borderRadius: '6px',
     boxSizing: 'border-box',
     fontSize: '14px'
+  };
+
+  const passwordRowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: '13px',
+    border: '1px solid #cbd5e1',
+    borderRadius: '6px',
+    boxSizing: 'border-box'
+  };
+
+  const passwordInputStyle = {
+    flex: 1,
+    minWidth: 0,
+    padding: '12px',
+    border: 'none',
+    outline: 'none',
+    borderRadius: '6px',
+    fontSize: '14px'
+  };
+
+  const eyeButtonStyle = {
+    border: 'none',
+    background: 'white',
+    cursor: 'pointer',
+    padding: '8px 12px',
+    fontSize: '19px',
+    flexShrink: 0
   };
 
   return (
@@ -168,7 +218,7 @@ const handleSubmit = async (e) => {
     }}>
       <form onSubmit={handleSubmit} style={{
         width: '100%',
-        maxWidth: '400px',
+        maxWidth: '460px',
         padding: '30px',
         background: 'white',
         borderRadius: '12px',
@@ -180,7 +230,11 @@ const handleSubmit = async (e) => {
         </h2>
 
         <p style={{ textAlign: 'center', color: '#64748b' }}>
-          {isRegister ? 'Create your Field User account' : 'Sign in to your account'}
+       {isRegister
+  ? (isResponderRequest
+      ? 'Request Responder Access'
+      : 'Create Field User Account')
+  : 'Sign in to your account'}
         </p>
 
         {isRegister && (
@@ -216,6 +270,16 @@ const handleSubmit = async (e) => {
               style={inputStyle}
               required
             />
+            {isResponderRequest && (
+  <input
+    name="organization"
+    value={organization}
+    onChange={(e) => setOrganization(e.target.value)}
+    placeholder="Organization / Rescue Team"
+    style={inputStyle}
+    required
+  />
+)}
           </>
         )}
 
@@ -232,12 +296,17 @@ const handleSubmit = async (e) => {
         />
 
         {isRegister && (
-          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '-8px' }}>
+          <p style={{
+            fontSize: '12px',
+            color: '#64748b',
+            marginTop: '-8px'
+          }}>
             4–20 characters. Letters, numbers and underscores only.
           </p>
         )}
 
-        <div style={{ display: 'flex', marginBottom: '13px' }}>
+        {/* Password */}
+        <div style={passwordRowStyle}>
           <input
             name="password"
             type={showPassword ? 'text' : 'password'}
@@ -245,27 +314,34 @@ const handleSubmit = async (e) => {
             onChange={updateField}
             placeholder="Password"
             autoComplete={isRegister ? 'new-password' : 'current-password'}
-            style={{ ...inputStyle, marginBottom: 0, flex: 1, minWidth: 0 }}
+            style={passwordInputStyle}
             required
           />
 
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            style={{ marginLeft: '5px', cursor: 'pointer' }}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+            style={eyeButtonStyle}
           >
-            {showPassword ? 'Hide' : 'Show'}
+            {showPassword ? '🙈' : '👁️'}
           </button>
         </div>
 
         {isRegister && (
           <>
-            <p style={{ fontSize: '12px', color: '#64748b' }}>
+            <p style={{
+              fontSize: '12px',
+              color: '#64748b',
+              marginTop: '0',
+              marginBottom: '13px'
+            }}>
               Password: 8–20 characters, uppercase, lowercase, number and
               special character. No spaces.
             </p>
 
-            <div style={{ display: 'flex', marginBottom: '13px' }}>
+            {/* Confirm Password */}
+            <div style={passwordRowStyle}>
               <input
                 name="confirmPassword"
                 type={showConfirmPassword ? 'text' : 'password'}
@@ -273,27 +349,40 @@ const handleSubmit = async (e) => {
                 onChange={updateField}
                 placeholder="Confirm Password"
                 autoComplete="new-password"
-                style={{ ...inputStyle, marginBottom: 0, flex: 1, minWidth: 0 }}
+                style={passwordInputStyle}
                 required
               />
 
               <button
                 type="button"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                style={{ marginLeft: '5px', cursor: 'pointer' }}
+                onClick={() =>
+                  setShowConfirmPassword(!showConfirmPassword)
+                }
+                aria-label={
+                  showConfirmPassword
+                    ? 'Hide confirm password'
+                    : 'Show confirm password'
+                }
+                style={eyeButtonStyle}
               >
-                {showConfirmPassword ? 'Hide' : 'Show'}
+                {showConfirmPassword ? '🙈' : '👁️'}
               </button>
             </div>
+
+        
           </>
         )}
 
         {error && (
-          <p style={{ color: '#dc2626', fontSize: '13px' }}>{error}</p>
+          <p style={{ color: '#dc2626', fontSize: '13px' }}>
+            {error}
+          </p>
         )}
 
         {success && (
-          <p style={{ color: '#15803d', fontSize: '13px' }}>{success}</p>
+          <p style={{ color: '#15803d', fontSize: '13px' }}>
+            {success}
+          </p>
         )}
 
         <button
@@ -310,14 +399,29 @@ const handleSubmit = async (e) => {
             opacity: loading ? 0.7 : 1
           }}
         >
-          {loading
-            ? (isRegister ? 'Creating Account...' : 'Logging in...')
-            : (isRegister ? 'Create Account' : 'Login')}
+        {loading
+  ? (isResponderRequest
+      ? 'Submitting Request...'
+      : isRegister
+        ? 'Creating Account...'
+        : 'Logging in...')
+  : (isResponderRequest
+      ? 'Submit Responder Request'
+      : isRegister
+        ? 'Create Account'
+        : 'Login')}
         </button>
 
-        <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '14px' }}>
-          {isRegister ? 'Already have an account?' : "Don't have an account?"}
+        <p style={{
+          textAlign: 'center',
+          marginTop: '20px',
+          fontSize: '14px'
+        }}>
+          {isRegister
+            ? 'Already have an account?'
+            : "Don't have an account?"}
           {' '}
+
           <button
             type="button"
             onClick={() => switchMode(!isRegister)}
@@ -332,6 +436,29 @@ const handleSubmit = async (e) => {
             {isRegister ? 'Login' : 'Register'}
           </button>
         </p>
+        {!isRegister && (
+  <p style={{ textAlign: 'center', marginTop: '12px' }}>
+    Are you a rescue team member?{' '}
+    <button
+      type="button"
+      onClick={() => {
+        setIsRegister(true);
+        setIsResponderRequest(true);
+        setError('');
+        setSuccess('');
+      }}
+      style={{
+        border: 'none',
+        background: 'none',
+        color: '#2563eb',
+        cursor: 'pointer',
+        fontWeight: 'bold'
+      }}
+    >
+      Request Responder Access
+    </button>
+  </p>
+)}
       </form>
     </div>
   );
